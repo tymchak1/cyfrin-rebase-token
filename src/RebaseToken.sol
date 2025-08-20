@@ -15,8 +15,8 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 contract RebaseToken is ERC20, Ownable, AccessControl {
     error RebaseToken__InterestRateCanOnlyDecrease(uint256 newInterestRate, uint256 oldInterestRate);
 
-    uint256 private constant PRECICION_FACTOR = 1e27;
-    uint256 private s_interestRate = (5 * PRECICION_FACTOR) / 1e8;
+    uint256 private constant PRECICION_FACTOR = 1e18;
+    uint256 private s_interestRate = 5e10;
     mapping(address user => uint256 interestRate) private s_userInterestRate;
     mapping(address user => uint256 timestamp) private s_userLastUpdatedTimestamp;
 
@@ -36,7 +36,7 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
      * @dev The intrest rate can only decrease
      */
     function setInterestRate(uint256 _newInterestRate) external onlyOwner {
-        if (s_interestRate < _newInterestRate) {
+        if (_newInterestRate >= s_interestRate) {
             revert RebaseToken__InterestRateCanOnlyDecrease(s_interestRate, _newInterestRate);
         }
         s_interestRate = _newInterestRate;
@@ -48,9 +48,9 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
      * @param _to The address to mint tokens to
      * @param _amount The amount of tokens to mint
      */
-    function mint(address _to, uint256 _amount) external onlyRole(MINT_AND_BURN_ROLE) {
+    function mint(address _to, uint256 _amount, uint256 _userInterestRate) external onlyRole(MINT_AND_BURN_ROLE) {
         _mintAccruedInterest(_to);
-        s_userInterestRate[_to] = s_interestRate;
+        s_userInterestRate[_to] = _userInterestRate;
         _mint(_to, _amount);
     }
 
@@ -72,6 +72,9 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
     function balanceOf(address _user) public view override returns (uint256) {
         // _balances[_user] + earned tokens
         uint256 principleBalance = super.balanceOf(_user);
+        if (principleBalance == 0) {
+            return 0;
+        }
         // principleAmount(1 + (userinterestRate * timeElapsed))
         // 1 + (userinterestRate * timeElapsed) = linearInterest
         uint256 linearInterest = _calculateUserAccumulatedInterestSinceLastUpdate(_user) / PRECICION_FACTOR;
@@ -87,11 +90,11 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
      * @dev If the recipient has no balance, it sets their interest rate to the sender's interest rate
      */
     function transfer(address _recepient, uint256 _amount) public override returns (bool) {
-        _mintAccruedInterest(msg.sender);
-        _mintAccruedInterest(_recepient);
         if (_amount == type(uint256).max) {
             _amount = balanceOf(msg.sender);
         }
+        _mintAccruedInterest(msg.sender);
+        _mintAccruedInterest(_recepient);
         if (balanceOf(_recepient) == 0) {
             s_userInterestRate[_recepient] = s_userInterestRate[msg.sender];
             // s_userInterestRate[_recepient] = s_interestRate;
@@ -109,13 +112,13 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
      * @dev If the recipient has no balance, it sets their interest rate to the sender's interest rate
      */
     function transferFrom(address _sender, address _recepient, uint256 _amount) public override returns (bool) {
-        _mintAccruedInterest(_sender);
-        _mintAccruedInterest(_recepient);
         if (_amount == type(uint256).max) {
             _amount = balanceOf(msg.sender);
         }
+        _mintAccruedInterest(_sender);
+        _mintAccruedInterest(_recepient);
         if (balanceOf(_recepient) == 0) {
-            s_userInterestRate[_recepient] = s_userInterestRate[msg.sender];
+            s_userInterestRate[_recepient] = s_userInterestRate[_sender];
             // s_userInterestRate[_recepient] = s_interestRate;
             // s_userLastUpdatedTimestamp[_recepient] = block.timestamp;
         }
@@ -127,19 +130,6 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice Mints the accrued interest for the user since their last interaction with protocol
-     * @param _user The user to mint the accured interest to
-     */
-    function _mintAccruedInterest(address _user) internal {
-        uint256 previousPrincipleBalance = super.balanceOf(_user);
-        uint256 currentBalance = balanceOf(_user);
-        uint256 balanceIncrease = currentBalance - previousPrincipleBalance;
-        // first calculating with old timestamp and after updating to current, so in next calculations it would be used
-        s_userLastUpdatedTimestamp[_user];
-        _mint(_user, balanceIncrease);
-    }
-
-    /**
      * @notice Calculates the accumulated interest for the user since their last update
      * @param _user The address of the user
      * @return linearInterest The accumulated interest for the user since their last update
@@ -149,10 +139,23 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
         view
         returns (uint256 linearInterest)
     {
-        uint256 timeElapsed = block.timestamp - s_userLastUpdatedTimestamp[_user];
+        uint256 timeDifference = block.timestamp - s_userLastUpdatedTimestamp[_user];
         // (principleAmount) + (principleAmount * userInterestRate * timeElapsed)
         //  1 + (userinterestRate * timeElapsed)
-        linearInterest = (PRECICION_FACTOR + (s_userInterestRate[_user] + timeElapsed));
+        linearInterest = (s_userInterestRate[_user] * timeDifference) + PRECICION_FACTOR;
+    }
+
+    /**
+     * @notice Mints the accrued interest for the user since their last interaction with protocol
+     * @param _user The user to mint the accured interest to
+     */
+    function _mintAccruedInterest(address _user) internal {
+        uint256 previousPrincipleBalance = super.balanceOf(_user);
+        uint256 currentBalance = balanceOf(_user);
+        uint256 balanceIncrease = currentBalance - previousPrincipleBalance;
+        // first calculating with old timestamp and after updating to current, so in next calculations it would be used
+        _mint(_user, balanceIncrease);
+        s_userLastUpdatedTimestamp[_user] = block.timestamp;
     }
 
     /*//////////////////////////////////////////////////////////////
