@@ -149,9 +149,8 @@ contract RebaseTokenTest is Test {
 
     function testCannotCallMint() public {
         vm.startPrank(USER);
-        uint256 interestRate = rebaseToken.getInterestRate();
         vm.expectRevert();
-        rebaseToken.mint(USER, SEND_VALUE);
+        rebaseToken.mint(USER, SEND_VALUE, rebaseToken.getInterestRate());
         vm.stopPrank();
     }
 
@@ -227,7 +226,7 @@ contract RebaseTokenTest is Test {
 
         // Mint tokens as minter
         vm.prank(minter);
-        rebaseToken.mint(recipient, mintAmount);
+        rebaseToken.mint(recipient, mintAmount, rebaseToken.getInterestRate());
         assertEq(rebaseToken.balanceOf(recipient), mintAmount);
 
         // Burn tokens as minter
@@ -240,7 +239,7 @@ contract RebaseTokenTest is Test {
         address attacker = makeAddr("attacker");
         vm.prank(attacker);
         vm.expectRevert();
-        rebaseToken.mint(attacker, 1e18);
+        rebaseToken.mint(attacker, 1e18, rebaseToken.getInterestRate());
     }
 
     function testBurnWithoutRoleFails() public {
