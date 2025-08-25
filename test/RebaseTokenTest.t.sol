@@ -78,8 +78,9 @@ contract RebaseTokenTest is Test {
 
         // Deposit funds
         vm.deal(USER, depositAmount);
-        vm.prank(USER);
+        vm.startPrank(USER);
         vault.deposit{value: depositAmount}();
+        vm.stopPrank();
 
         // check the balance has increased after some time has passed
         vm.warp(time);
@@ -89,12 +90,14 @@ contract RebaseTokenTest is Test {
 
         // Add rewards to the vault
         vm.deal(OWNER, balance - depositAmount);
-        vm.prank(OWNER);
+        vm.startPrank(OWNER);
         addRewardsToVault(balance - depositAmount);
+        vm.stopPrank();
 
         // Redeem funds
-        vm.prank(USER);
+        vm.startPrank(USER);
         vault.redeem(balance);
+        vm.stopPrank();
 
         uint256 ethBalance = address(USER).balance;
 
@@ -150,7 +153,7 @@ contract RebaseTokenTest is Test {
     function testCannotCallMint() public {
         vm.startPrank(USER);
         vm.expectRevert();
-        rebaseToken.mint(USER, SEND_VALUE, rebaseToken.getInterestRate());
+        rebaseToken.mint(USER, SEND_VALUE, 0); // спрощено, підставляємо 0 замість userInterestRate
         vm.stopPrank();
     }
 
@@ -225,21 +228,22 @@ contract RebaseTokenTest is Test {
         rebaseToken.grantMintAndBurnRole(minter);
 
         // Mint tokens as minter
-        vm.prank(minter);
-        rebaseToken.mint(recipient, mintAmount, rebaseToken.getInterestRate());
+        vm.startPrank(minter);
+        rebaseToken.mint(recipient, mintAmount, rebaseToken.getUserInterestRate(recipient));
         assertEq(rebaseToken.balanceOf(recipient), mintAmount);
 
         // Burn tokens as minter
-        vm.prank(minter);
         rebaseToken.burn(recipient, burnAmount);
         assertEq(rebaseToken.balanceOf(recipient), mintAmount - burnAmount);
+        vm.stopPrank();
     }
 
     function testMintWithoutRoleFails() public {
         address attacker = makeAddr("attacker");
-        vm.prank(attacker);
+        vm.startPrank(attacker);
         vm.expectRevert();
-        rebaseToken.mint(attacker, 1e18, rebaseToken.getInterestRate());
+        rebaseToken.mint(attacker, 1e18, 123);
+        vm.stopPrank();
     }
 
     function testBurnWithoutRoleFails() public {
